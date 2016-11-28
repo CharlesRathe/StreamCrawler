@@ -1,0 +1,27 @@
+#!/bin/bash 
+interface=$(ifconfig | grep 'wlan' | cut -d ' ' -f1)
+interface=$(echo $interface|cut -d ' ' -f1)
+echo $interface
+sudo echo "nameserver 127.0.1.1">>/etc/resolvconf/resolv.conf.d/base
+#sudo echo "search cs.kuleuven.be labo1.cs.kuleuven.be labo4.cs.kuleuven.be">>/etc/resolvconf/resolv.conf.d/base
+sudo echo "nameserver 8.8.8.8">>/etc/resolvconf/resolv.conf.d/base
+sudo echo "nameserver 127.0.1.1">>/etc/resolvconf/resolv.conf.d/head
+#sudo echo "search cs.kuleuven.be labo1.cs.kuleuven.be labo4.cs.kuleuven.be">>/etc/resolvconf/resolv.conf.d/head
+sudo echo "nameserver 8.8.8.8">>/etc/resolvconf/resolv.conf.d/head
+sudo service network-manager restart
+sleep 2
+for ((name=16;name<=49;name+=1))
+do
+echo $i
+sudo ip netns add bot$name
+sudo ip link add veth-a$name type veth peer name veth-b$name
+sudo ip link set veth-a$name netns bot$name
+sudo ip netns exec bot$name ifconfig veth-a$name up 192.168.$name.1 netmask 255.255.255.0
+sudo ifconfig veth-b$name up 192.168.$name.254 netmask 255.255.255.0
+sudo ip netns exec bot$name route add default gw 192.168.$name.254 dev veth-a$name
+echo 1 | sudo tee /proc/sys/net/ipv4/ip_forward
+sudo iptables -t nat -A POSTROUTING -s 192.168.$name.0/24 -o $interface -j MASQUERADE #use eth0 or wlan0 depending on config
+sudo iptables -A FORWARD -i $interface -o veth-b$name -j ACCEPT
+sudo iptables -A FORWARD -o wlan0 -i veth-b$name -j ACCEPT
+sudo ip netns exec bot$name ip link set lo up
+done

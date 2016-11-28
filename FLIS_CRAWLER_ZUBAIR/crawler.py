@@ -1,0 +1,233 @@
+#Author: M. Zubair Rafique
+
+#Permission  to  freely  reproduce  all  or  part  of  this  code  for  noncommercial
+#purposes is granted provided that copies bear this notice and the full citation
+#of our NDSS 2016 paper.  
+#https://zubairrafique.wordpress.com/2015/10/28/ndss-2016-its-free-for-a-reason-exploring-the-ecosystem-of-free-live-streaming-services/
+
+# Reproduction for commercial purposes is strictly prohibited without the prior written consent from 
+# the KU Leuven, the Internet Society, and the first author: M Zubair Rafique
+
+#Comments and Suggestions: <zubair.rafique@cs.kuleuven.be> <rafique.zubair@gmail.com>
+# ======================================================================================
+
+import sys, os, time
+from selenium import webdriver
+from optparse import OptionParser
+import urllib
+
+#Globals
+DEBUG = False
+iFrameTree = []
+
+#max iframe recursion limit 
+IF_COUNT = 20
+
+def iterateIframes(driver, path, pa, level,directory, location):
+    """ Iterrate iframes """
+    
+    global IF_COUNT
+    
+    IF_COUNT = IF_COUNT - 1
+    count = 0
+    
+    iframes = driver.find_elements_by_tag_name('iframe')
+    
+    if not (iframes) or len(iframes) == 0 or IF_COUNT <= 0: #stopping condtions
+        return    
+    
+    if DEBUG:
+        print ('nchilds', len(iframes))
+        for iframe in iframes:
+            print ('child-', iframe.get_attribute("src"))  
+            print 
+         
+    for iframe in iframes:
+        path.append(iframe.get_attribute("src"))
+        pa.append(iframe)
+        level = level +"-"+ str(count)
+        
+        if DEBUG:
+            print ('count', count) 
+            print
+            print (level, iframe.get_attribute("src"))
+        
+        iFrameTree.append([level,iframe.get_attribute("src")])
+        
+        #location of iframe
+        filename = directory +"/"+ level
+        location_local = iframe.location
+        size = iframe.size
+        new_location = { k: location_local.get(k, 0) + location.get(k, 0) for k in set(location_local) }
+        f = open(directory+"/iFrameLocation.txt",'a')    
+        f.write(level+" "+str(location)+","+str(location_local)+","+str(size)+"\n") 
+        f.close()
+        new_location = { k: location_local.get(k, 0) + location.get(k, 0) for k in set(location_local) }
+        
+        #pass exceptions, in case of dynamic changes
+        try: driver.switch_to.frame(iframe)
+        except: pass
+        
+        html_source = driver.page_source
+        
+        #write HTML of iframe
+        f = open(filename + ".html",'w')
+        f.write (str(html_source.encode('ascii', 'ignore')))
+        f.close()
+        
+        #
+        iterateIframes(driver, path, pa, level, directory, new_location)
+        pa.pop()
+        driver = switchToParent(driver,pa)
+        
+        #
+        level = level[0: - (len(str(count))+1)]
+        count+= 1
+        
+    
+    return 
+
+def switchToParent(driver,pa):
+    
+    driver.switch_to.default_content()
+    for iframe in pa:
+        driver.switch_to.frame(iframe)
+    return driver 
+
+def pageScrapper(url,directory,useragent,chromedriver):
+    """ Inititating driver for scrapping """
+
+    driver = None
+    
+    #Web Driver's Option
+    options = webdriver.ChromeOptions()
+    options.add_argument('--allow-running-insecure-content')
+    options.add_argument('--disable-web-security')
+    options.add_argument('--user-agent='+useragent)
+    options.add_argument("--start-maximized");
+    #options.add_experimental_option('prefs', {'download.default_directory':directory+"/downloads"})
+    options.add_argument("--disable-app-info-dialog-mac");
+    options.add_argument("--allow-unchecked-dangerous-downloads"); 
+    options.add_argument("--disable-popup-blocking");
+    options.add_argument("--disable-download-notification");
+    options.add_argument("--disable-extensions");
+    options.add_argument("--bwsi");
+    options.add_argument("--incognito")
+    
+    driver = webdriver.Chrome(chromedriver,chrome_options=options)   
+    
+    print ("Loading", url)
+    driver.get(url)
+    
+    time.sleep(2)
+    
+    #redirection
+    if (url!= driver.current_url):
+        log_urls = open(directory+"log_redirect_urls.text","w")
+        log_urls.write(driver.current_url+"\n")
+        log_urls.close()
+        os.system("mkdir "+directory+"/redirect")
+        driver.save_screenshot(directory+"/redirect/redir.png")
+        time.sleep(4)
+    
+    #naive alert handling
+    try:
+        alert = driver.switch_to_alert()
+        alert.accept()
+        print ("alert accepted")
+    except:
+        print ("no alert")
+    
+    #saving source code of the page, and taking a screenshot
+    html_source = driver.page_source
+    root_html = open(directory+"/root.html",'w')
+    root_html.write (str(html_source.encode('ascii', 'ignore')))
+    root_html.close()
+    driver.save_screenshot(directory+"/root.png")
+    
+    #
+    time.sleep(10)
+    
+    #iterating iframes in the page
+    try: iterateIframes(driver,[],[],"root",directory,driver.find_elements_by_tag_name('html')[0].location)
+    except: pass
+    
+    #getting links
+    getLinksAggresively(directory) 
+    
+    #
+    storeIframeTree(directory)
+    
+    #
+    downloadImages(directory)
+    
+    driver.close()
+
+def getLinksAggresively(directory):
+    """ Handy approach. Also Works in following case
+    <a href="javascript: void(0)" onclick="window.open('http://0eb.net/video/1358313.html');return false;"><b>Link 1</b></a>
+    Warning: Output require cleaning """
+    
+    files = os.listdir(directory+"/")
+    
+    for file in files:
+        if ".html" in file:
+            cmd = "grep -oE \'\\b(https?|ftp|file)://[-A-Za-z0-9+&@#/%?=~_|\!:,.;]*[-A-Za-z0-9+&@#/%=~_|]\' "+directory+file+">>"+directory+"rawLinksBrute.txt"
+            os.system(cmd)    
+            cmd = "lynx -dump   -listonly -unique_urls -nonumbers -nostatus "+directory+"/"+file+">>"+directory+"/rawLinks.txt"
+            os.system(cmd)
+
+def storeIframeTree(directory):
+    """ Store the iframe Hierarchy, in case there are no dynamic changes"""
+    
+    global iFrameTree
+    
+    iframe_log = open(directory+"/iFrameTree.txt",'w')
+    
+    for i in iFrameTree:
+        ntabs = i[0].count("-")
+        s=""
+        for j in range(ntabs):
+            s+="\t"
+        iframe_log.write(s+i[0]+" "+i[1][0:500]+"\n")        
+    
+    iframe_log.close()
+
+def downloadImages(directory):
+    """ Download images explicitly and store it in a directory"""
+    
+    if not os.path.isdir(directory+"/images"):
+        os.system("mkdir "+directory+"/images")
+    
+    ext = set(['jpg','jpeg','png','gif','tiff','exif','bmp','png','ico','ppm'])
+    
+    links = open(directory+"/rawLinksBrute.txt")
+    
+    for i in set(links):
+        i = i.strip("\n")
+        a = (i.split('/')[-1]).split(".")[-1]
+        if a in ext:
+            urllib.urlretrieve(i, directory+"/images/"+i.split('/')[-1])    
+
+if __name__ == '__main__':
+    
+    curernt_dir = os.path.dirname(os.path.abspath(__file__))
+    usage = "usage: %prog -u URL -d Directory [options]"
+    parser = OptionParser(usage=usage)
+    parser.add_option("-u", "--url", dest="url", action="store", type="string",
+                  help="URL to crawl", metavar="URL")
+    parser.add_option("-d", "--dir", dest="dir", action="store", type="string",
+                  help="Directory to store data", metavar="DIR")
+    parser.add_option("-a", "--useragent", dest="ua", action="store", type="string",
+                  help="User Agent value", metavar="UA", default="Mozilla/5.0 (compatible, MSIE 11, Windows NT 6.3; Trident/7.0; rv:11.0)")            
+    parser.add_option("-p", "--driverpath", dest="cp", action="store", type="string",
+                  help="Chrome dirver path", metavar="CP", default=curernt_dir+'/chromedriver') 
+    
+    (options, args) = parser.parse_args()
+    
+    os.environ["webdriver.chrome.driver"] = options.cp
+    
+    pageScrapper(options.url,options.dir,options.ua,options.cp)
+    
+    
+    
