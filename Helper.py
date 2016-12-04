@@ -67,7 +67,7 @@ def recurse_get_sources(driver, done, site_to_crawl, errors, frame_array, video_
                 return
 
             if time.time() - t >(500*60):
-                to_pickle = {'iframe': frame_array, 'video': video_array}
+                to_pickle = {'iframe': frame_array, 'video': video_array, 'errors': errors}
                 site_split = urlsplit(site_to_crawl)
                 newfile = (os.path.join(os.path.dirname(__file__), ("logs/" + site_split.hostname.replace('.', '_')) + "_sources.p"))
                 of = open(newfile, "wb")
@@ -77,3 +77,4 @@ def recurse_get_sources(driver, done, site_to_crawl, errors, frame_array, video_
 
             elif childSrc not in visited:
                 recurse_get_sources(driver, done, childSrc, errors, frame_array, video_array, visited, t, topSite)
+                return
