@@ -57,7 +57,7 @@ for topSite in topSites:
         of = open(newfile, "wb")
         pickle.dump(to_pickle, of)
 
-
+    f.close()
 
 
 

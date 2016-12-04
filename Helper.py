@@ -8,6 +8,8 @@ def recurse_get_sources(driver, done, site_to_crawl, errors, frame_array, video_
     # Go to site
     try:
         driver.get(site_to_crawl)
+        print("Node: " + site_to_crawl)
+
 
     except TimeoutError:
         print("TIMEOUT")
@@ -24,18 +26,21 @@ def recurse_get_sources(driver, done, site_to_crawl, errors, frame_array, video_
     child_frames = driver.find_elements_by_xpath('//iframe[@src]')
     child_videos = driver.find_elements_by_xpath('//video[@src]')
     child_links = driver.find_elements_by_xpath('//a[@href]')
-    error_links = driver.find_elements_by_xpath('//*[contains(text(), "error")]')
+    error_links = driver.find_elements_by_xpath('//*[contains(text(), "error") and contains(text(), "media")]')
 
     for childLink in child_links:
-        child_sources.append(childLink.get_attribute("href"))
-        print("Adding: " + childLink.get_attribute("href") + " to children")
+        if "javascript" not in childLink.get_attribute('href'):
+            child_sources.append(childLink.get_attribute("href"))
+            print("Adding: " + childLink.get_attribute("href") + " to children")
+        else:
+            print("Couldn't add " + childLink.get_attribute('href'))
 
     # Run links through filters (subject to change)
     for child_index, child_source in enumerate(child_sources):
         if "mailto" in child_source or "login" in child_source or "imdb" in child_source or "twitter" in child_source or "facebook" in child_source \
                 or "search" in child_source or "google" in child_source or "png" in child_source or "jpg" in child_source or "gif" in child_source \
                 or "rottentomatoes" in child_source or child_source == site_to_crawl or child_source.endswith('#') \
-                or "genre" in child_source:
+                or "genre" in child_source or "javascript" in child_source:
             visited.add(child_source)
             del child_sources[child_index]
 
@@ -44,7 +49,7 @@ def recurse_get_sources(driver, done, site_to_crawl, errors, frame_array, video_
 
     # Add new video sources to list
     for child_frame in child_frames:
-        if "facebook" not in child_frame:
+        if "facebook" not in child_frame.get_attribute('src') or "twitter" not in child_frame.get_attribute('src') or "google" not in child_frame.get_attribute('src'):
             frame_array.append(child_frame.get_attribute('src'))
             print("Adding frame: " + child_frame.get_attribute('src'))
 
@@ -64,9 +69,11 @@ def recurse_get_sources(driver, done, site_to_crawl, errors, frame_array, video_
         for childSrc in child_sources:
 
             if done == 1:
+                print("Done = 1")
                 return
 
             if time.time() - t >(500*60):
+                print("Pickling")
                 to_pickle = {'iframe': frame_array, 'video': video_array, 'errors': errors}
                 site_split = urlsplit(site_to_crawl)
                 newfile = (os.path.join(os.path.dirname(__file__), ("logs/" + site_split.hostname.replace('.', '_')) + "_sources.p"))
@@ -77,4 +84,4 @@ def recurse_get_sources(driver, done, site_to_crawl, errors, frame_array, video_
 
             elif childSrc not in visited:
                 recurse_get_sources(driver, done, childSrc, errors, frame_array, video_array, visited, t, topSite)
-                return
+                print("Next Recursion")
